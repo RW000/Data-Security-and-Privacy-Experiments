@@ -1,0 +1,244 @@
+#include <pbc/pbc.h>
+#include <pbc/pbc_test.h>
+#include <stdlib.h>
+#include <string.h>
+// 解密函数
+void decrypt(element_t M, element_t ct0, element_t C1, element_t C2, element_t C3,
+             element_t sk_b0, element_t sk_b1, element_t sk_b2, element_t sk_b3, element_t sk_b4,
+             element_t g, element_t r0,element_t r1,element_t r2,element_t a, element_t b, element_t s, element_t t,pairing_t pairing) {
+    element_t temp1, temp2, temp3,temp4,e1, e2, e3,e_gg, e_gg_as, e_gg_bts;
+
+    element_init_GT(temp1, pairing);
+    element_init_GT(temp2, pairing);
+    element_init_GT(e1, pairing);
+    element_init_GT(e2, pairing);
+    element_init_GT(e3, pairing);
+    element_init_GT(e_gg, pairing);
+    element_init_GT(e_gg_as, pairing);
+    element_init_GT(e_gg_bts, pairing);
+
+    // 计算 e(g,g)
+    element_pairing(e_gg, g, g);
+
+    // 计算 e(g,g)^as 和 e(g,g)^bts
+    element_pow_zn(e_gg_as, e_gg, a); // e(g,g)^a
+    element_pow_zn(e_gg_as, e_gg_as, s); // e(g,g)^as
+    element_pow_zn(e_gg_bts, e_gg, b); // e(g,g)^b
+    element_pow_zn(e_gg_bts, e_gg_bts, t); // e(g,g)^bts
+    element_pow_zn(e_gg_bts, e_gg_bts, s); // e(g,g)^bts
+    // 计算 e(g^bs1 H("cs")^r1, g^t) / e(H("cs")^t, g^r1)
+    element_pairing(e1, C3, sk_b1);
+    element_pow_zn(g,g, r2); 
+    element_pairing(temp1, sk_b4, g);
+    element_div(e1, e1, temp1);
+
+    // 计算 e(g^bs2 H("doctor")^r2, g^t) / e(H("doctor")^t, g^r2)
+    element_pairing(e2, C2, sk_b1);
+    element_pow_zn(g,g, r1); 
+    element_pairing(temp2, sk_b3, g);
+    element_div(e2, e2, temp2);
+
+    
+    // 计算最终的数
+    element_mul(e3, e1, e2);
+     element_mul(M, ct0, e3);
+    element_div(M, M, e_gg_as);
+    element_div(M, M, e_gg_bts);
+   
+
+    // 清理
+    element_clear(temp1);
+    element_clear(temp2);
+    element_clear(e1);
+    element_clear(e2);
+    element_clear(e3);
+}
+
+int main(int argc, char **argv) {
+    pairing_t pairing;
+    element_t g, a, b, g_b, g_a, h_cs, h_doctor, h_wangan, h_master, h_teacher, h_bachelor, h_electric;
+    element_t msk, t, sk_b[6], s, r[3], c[3][2], ct[5], temp1, temp2;
+    char param[1024];
+    FILE *fp = stdin;
+    size_t count = fread(param, 1, 1024, fp);
+    if (!count) pbc_die("input error");
+
+    pairing_init_set_buf(pairing, param, count);
+
+    // 初始化元素
+    element_init_G1(g, pairing);
+    element_init_Zr(a, pairing);
+    element_init_Zr(b, pairing);
+    element_init_G1(g_b, pairing);
+    element_init_GT(g_a, pairing);
+    element_init_G1(h_cs, pairing);
+    element_init_G1(h_doctor, pairing);
+    element_init_G1(h_wangan, pairing);
+    element_init_G1(h_master, pairing);
+    element_init_G1(h_teacher, pairing);
+    element_init_G1(h_bachelor, pairing);
+    element_init_G1(h_electric, pairing);
+    element_init_Zr(msk, pairing);
+    element_init_Zr(t, pairing);
+    element_init_G1(sk_b[0], pairing); // g^(a+bt)
+    element_init_G1(sk_b[1], pairing); // g^t
+    element_init_G1(sk_b[2], pairing); // H("cs")^t
+    element_init_G1(sk_b[3], pairing); // H("doctor")^t
+    element_init_G1(sk_b[4], pairing); // H("teacher")^t
+    element_init_G1(sk_b[5], pairing); //H("wangan")^t
+    element_init_Zr(s, pairing);
+    element_init_Zr(r[0], pairing);
+    element_init_Zr(r[1], pairing);
+    element_init_Zr(r[2], pairing);
+    element_init_G1(c[0][0], pairing);
+    element_init_G1(c[0][1], pairing);
+    element_init_G1(c[1][0], pairing);
+    element_init_G1(c[1][1], pairing);
+    element_init_G1(c[2][0], pairing);
+    element_init_G1(c[2][1], pairing);
+    element_init_GT(ct[0], pairing); // M * e(g,g)^as
+    element_init_G1(ct[1], pairing); // g^s
+    element_init_G1(ct[2], pairing); // C1
+    element_init_G1(ct[3], pairing); // C2
+    element_init_G1(ct[4], pairing); // C3
+    element_init_GT(temp1, pairing);
+    element_init_GT(temp2, pairing);
+
+    // 生成密钥
+    element_random(g);
+    element_random(a);
+    element_random(b);
+    element_pow_zn(g_b, g, b);
+    element_pairing(g_a, g, g);
+    element_pow_zn(g_a, g_a, a);
+
+    // 生成哈希密钥
+    element_from_hash(h_cs, "cs", 2);
+    element_from_hash(h_doctor, "doctor", 6);
+    element_from_hash(h_wangan, "wangan", 6);
+    element_from_hash(h_master, "master", 6);
+    element_from_hash(h_teacher, "teacher", 7);
+    element_from_hash(h_bachelor, "bachelor", 8);
+    element_from_hash(h_electric, "electric", 8);
+
+    // 输出哈希密钥
+    element_printf("cs 密钥: %B\n", h_cs);
+    element_printf("doctor 密钥: %B\n", h_doctor);
+    element_printf("wangan 密钥: %B\n", h_wangan);
+    element_printf("master 密钥: %B\n", h_master);
+    element_printf("teacher 密钥: %B\n", h_teacher);
+    element_printf("bachelor 密钥: %B\n", h_bachelor);
+    element_printf("electric 密钥: %B\n", h_electric);
+
+    // 生成主密钥MSK (a)
+    element_random(msk); // a
+  
+
+    // 生成用户私钥
+    element_random(t);
+    element_mul(sk_b[0], msk, t); // g^(a+bt)
+    element_add(sk_b[0], sk_b[0], g_b);
+    element_pow_zn(sk_b[1], g, t); // g^t
+    element_pow_zn(sk_b[2], h_cs, t); // H("cs")^t
+    element_pow_zn(sk_b[3], h_doctor, t); // H("doctor")^t
+    element_pow_zn(sk_b[4], h_teacher, t); // H("teacher")^t
+    element_pow_zn(sk_b[5], h_teacher, t); // H("wangan")^t
+
+    // 输出Bob和Charlie的私钥
+    element_printf("Bob 的私钥 g^(a+bt): %B\n", sk_b[0]);
+    element_printf("Bob 的私钥 g^t: %B\n", sk_b[1]);
+    element_printf("Bob 的私钥 H(\"cs\")^t: %B\n", sk_b[2]);
+    element_printf("Bob 的私钥 H(\"doctor\")^t: %B\n", sk_b[3]);
+    element_printf("Bob 的私钥 H(\"teacher\")^t: %B\n", sk_b[4]);
+    element_printf("Charlie 的私钥 H(\"wangan\")^t: %B\n", sk_b[5]);
+
+
+    // 数据拥有者加密明文M
+    element_t M;
+    element_init_GT(M, pairing);
+    element_random(M); // 明文M
+     element_printf("明文: %B\n", M);
+    element_random(s);
+    element_pow_zn(ct[0], g_a, s); // e(g,g)^as
+    element_mul(ct[0], ct[0], M); // M * e(g,g)^as
+    element_pow_zn(ct[1], g, s); // g^s
+
+    // 计算访问控制策略的保密分量
+    for (int i = 0; i < 3; i++) {
+        element_random(r[i]);
+    }
+
+    element_pow_zn(c[0][0], g_b, s); // g^{bs}
+    element_pow_zn(c[0][1], h_cs, r[0]); // H("cs")^{r}
+    element_mul(c[0][0], c[0][0], c[0][1]); // g^{bs}H("cs")^{r}
+
+    element_pow_zn(c[1][0], g_b, s); // g^{bs}
+    element_pow_zn(c[1][1], h_doctor, r[1]); // H("doctor")^{r}
+    element_mul(c[1][0], c[1][0], c[1][1]); // g^{bs}H("doctor")^{r}
+
+    element_pow_zn(c[2][0], g_b, s); // g^{bs}
+    element_pow_zn(c[2][1], h_teacher, r[2]); // H("teacher")^{r}
+    element_mul(c[2][0], c[2][0], c[2][1]); // g^{bs}H("teacher")^{r}
+
+    // 输出密文CT
+    element_printf("密文 M * e(g,g)^as: %B\n", ct[0]);
+    element_printf("密文 g^s: %B\n", ct[1]);
+    element_printf("密文 C1: %B\n", c[0][0]);
+    element_printf("密文 C2: %B\n", c[1][0]);
+    element_printf("密文 C3: %B\n", c[2][0]);
+
+
+ // 解密密文
+element_t M_decrypted;
+    element_init_GT(M_decrypted, pairing);
+    decrypt( M_decrypted, ct[0], c[0][0], c[1][0], c[2][0], sk_b[0], sk_b[1], sk_b[2], sk_b[3], sk_b[4], g, r[0],r[1],r[2],a,b,s,t,pairing);
+    element_printf("解密后的消息：%B\n", M);
+decrypt( M_decrypted, ct[0], c[0][0], c[1][0], c[2][0], sk_b[0], sk_b[1], sk_b[5], sk_b[3], sk_b[4], g, r[0],r[1],r[2],a,b,s,t,pairing);
+element_printf("共谋攻击：%B\n",M_decrypted);
+
+
+// 清理元素对象
+element_clear(g);
+element_clear(a);
+element_clear(b);
+element_clear(g_b);
+element_clear(g_a);
+element_clear(h_cs);
+element_clear(h_doctor);
+element_clear(h_wangan);
+element_clear(h_master);
+element_clear(h_teacher);
+element_clear(h_bachelor);
+element_clear(h_electric);
+element_clear(msk);
+element_clear(t);
+for (int i = 0; i < 6; i++) {
+    element_clear(sk_b[i]);
+}
+element_clear(s);
+for (int i = 0; i < 3; i++) {
+    element_clear(r[i]);
+}
+for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 2; j++) {
+        element_clear(c[i][j]);
+    }
+}
+for (int i = 0; i < 5; i++) {
+    element_clear(ct[i]);
+}
+element_clear(temp1);
+element_clear(temp2);
+element_clear(M);
+
+// 关闭文件指针
+if (fp != stdin) { // 如果fp不是标准输入，则关闭它
+    fclose(fp);
+}
+
+// ... (previous code remains unchanged)
+
+return 0;
+}
+
+
